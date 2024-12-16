@@ -1,3 +1,6 @@
+mod notification_receiver;
+
+use crate::notification_receiver::{NotificationMsg, NotificationReceiver};
 use iced::theme::{Custom, Palette};
 use iced::widget::image;
 use iced::widget::{column, container, row};
@@ -12,104 +15,40 @@ use iced_runtime::Task;
 use std::collections::HashMap;
 use std::string::ToString;
 use std::sync::Arc;
-use zbus::object_server::SignalEmitter;
-use zbus::{fdo, interface, zvariant};
-
-struct Receiver;
-
-#[interface(name = "org.freedesktop.Notifications")]
-impl Receiver {
-    #[allow(clippy::too_many_arguments)]
-    pub async fn notify(
-        &mut self,
-        app_name: &str,
-        replaces_id: u32,
-        app_icon: &str,
-        summary: &str,
-        body: &str,
-        actions: Vec<&str>,
-        hints: HashMap<&str, zvariant::Value<'_>>,
-        expire_timeout: i32,
-    ) -> fdo::Result<i32> {
-        println!("Received notification from {app_name} with content {summary}");
-        Ok(0)
-    }
-
-    pub async fn close_notification(&self, id: u32) -> fdo::Result<()> {
-        Ok(())
-    }
-
-    pub fn get_capabilities(&self) -> Vec<String> {
-        println!("Get capabilities requested!");
-        vec!["body".to_string(), "actions".to_string()]
-    }
-    pub fn get_server_information(&self) -> fdo::Result<(String, String, String, String)> {
-        Ok((
-            "NotificationDaemon".to_string(),
-            "1.0".to_string(),
-            "rnd".to_string(),
-            "1.0".to_string(),
-        ))
-    }
-
-    pub async fn update_history(&self) -> fdo::Result<()> {
-        Ok(())
-    }
-
-    pub async fn open_history(&self) -> fdo::Result<()> {
-        println!("Getting history");
-        Ok(())
-    }
-
-    pub async fn close_history(&self) -> fdo::Result<()> {
-        println!("Closing history");
-        Ok(())
-    }
-
-    pub async fn toggle_history(&self) -> fdo::Result<()> {
-        println!("Toggling history");
-        Ok(())
-    }
-
-    pub async fn reply_close(&self, id: u32) -> fdo::Result<()> {
-        println!("Closing reply window");
-        Ok(())
-    }
-
-    #[zbus(signal)]
-    pub async fn action_invoked(
-        ctx: &SignalEmitter<'_>,
-        id: u32,
-        action_key: &str,
-    ) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    pub async fn notification_closed(
-        ctx: &SignalEmitter<'_>,
-        id: u32,
-        reason: u32,
-    ) -> zbus::Result<()>;
-
-    #[zbus(signal)]
-    pub async fn notification_replied(
-        ctx: &SignalEmitter<'_>,
-        id: u32,
-        message: &str,
-    ) -> zbus::Result<()>;
-}
+use tokio::sync::mpsc::Sender;
+use zbus::connection;
 
 #[tokio::main]
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
-    // let con = connection::Builder::session()?
-    //     .name("org.freedesktop.Notifications")
-    //     .unwrap()
-    //     .serve_at("/org/freedesktop/Notifications", Receiver)?
-    //     .build()
-    //     .await
-    //     .expect(
-    //         "Could not register notification daemon. Try to kill your running notification daemon.",
-    //     );
+    let (sender, mut recv) = tokio::sync::mpsc::channel(5);
+    let con = connection::Builder::session()?
+        .name("org.freedesktop.Notifications")
+        .unwrap()
+        .serve_at(
+            "/org/freedesktop/Notifications",
+            NotificationReceiver { sender },
+        )?
+        .build()
+        .await
+        .expect(
+            "Could not register notification daemon. Try to kill your running notification daemon.",
+        );
+
+    loop {
+        if let Some(msg) = recv.recv().await {
+            handle_msg(msg)
+        }
+    }
+    Ok(())
+}
+
+fn handle_msg(notification_msg: NotificationMsg) {
+    println!("Received {:?}", notification_msg);
+    spawn_popup()
+}
+
+fn spawn_popup() {
     daemon(
         Gradient::namespace,
         Gradient::update,
@@ -141,17 +80,6 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .run_with(|| (Gradient::new(), Task::none()))
     .expect("TODO: panic message");
-
-    let window_settings = window::Settings {
-        size: Size::new(200., 80.),
-        resizable: false,
-        decorations: false,
-        transparent: true,
-        level: Default::default(),
-        ..Default::default()
-    };
-
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
