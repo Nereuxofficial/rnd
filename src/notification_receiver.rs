@@ -1,22 +1,27 @@
+//! See <https://specifications.freedesktop.org/notification-spec/latest/protocol.html>
+use crate::BusSender;
+use iced::window;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use tokio::sync::mpsc::Sender;
 use zbus::object_server::SignalEmitter;
-use zbus::{connection, fdo, interface, zvariant};
+use zbus::{fdo, interface, zvariant};
 
 pub struct NotificationReceiver {
-    pub(crate) sender: Sender<NotificationMsg>,
+    pub(crate) sender: BusSender,
 }
 
+#[derive(Clone)]
 pub struct Notification {
-    app_name: Box<str>,
-    replaces_id: u32,
-    app_icon: Box<str>,
-    summary: Box<str>,
-    body: Box<str>,
-    actions: Vec<Box<str>>,
-    hints: HashMap<Box<str>, zvariant::OwnedValue>,
-    expire_timeout: i32,
+    pub id: window::Id,
+    pub app_name: Box<str>,
+    // TODO: This should be checked beforehand and made into some sort of Update for the notification
+    pub replaces_id: u32,
+    pub app_icon: Box<str>,
+    pub summary: Box<str>,
+    pub body: Box<str>,
+    pub actions: Vec<Box<str>>,
+    pub hints: HashMap<Box<str>, zvariant::OwnedValue>,
+    pub expire_timeout: i32,
 }
 
 impl Debug for Notification {
@@ -34,7 +39,7 @@ impl Debug for Notification {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NotificationMsg {
     Notification(Notification),
 }
@@ -53,9 +58,10 @@ impl NotificationReceiver {
         hints: HashMap<&str, zvariant::Value<'_>>,
         expire_timeout: i32,
     ) -> fdo::Result<u32> {
-        println!("Received notification from {app_name} with content {summary}");
+        let id = window::Id::unique();
         self.sender
             .send(NotificationMsg::Notification(Notification {
+                id,
                 app_name: Box::from(app_name),
                 replaces_id,
                 app_icon: Box::from(app_icon),
@@ -68,10 +74,11 @@ impl NotificationReceiver {
                     .collect(),
                 expire_timeout,
             }))
-            .await
-            .expect("Could n ot send message, UI thread may have crashed");
-        // TODO: Give back ID of notification. See https://specifications.freedesktop.org/notification-spec/latest/protocol.html
-        Ok(55)
+            .expect("Could not send message, UI task may have crashed");
+        // Since id does not expose a way to get the inner u64, we need to do this dumb conversion
+        // This is a lossy conversion,
+        // FIXME: Throw error if it does not fit in u32
+        Ok(id.to_string().parse().unwrap())
     }
 
     pub async fn close_notification(&self, id: u32) -> fdo::Result<()> {
