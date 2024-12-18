@@ -1,62 +1,51 @@
-use crate::notification_receiver::{NotificationMsg, NotificationReceiver};
+use crate::notification_receiver::{Notification, NotificationMsg};
 use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
 use iced::theme::{Custom, Palette};
-use iced::widget::{column, container, row};
+use iced::widget::{column, container, rich_text, row, text};
 use iced::widget::{image, Column};
-use iced::{event, ContentFit, Event, Size};
+use iced::{event, font, ContentFit, Event, Font, Pixels, Size};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
 use iced_layershell::build_pattern::{daemon, MainSettings};
-use iced_layershell::reexport::Anchor;
-use iced_layershell::settings::{LayerShellSettings, StartMode};
-use iced_layershell::to_layer_message;
-use iced_runtime::futures::subscription::{EventStream, Hasher, Recipe};
-use iced_runtime::futures::{BoxStream, Subscription};
+use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
+use iced_layershell::settings::{LayerShellSettings, Settings, StartMode};
+use iced_layershell::{to_layer_message, MultiApplication};
+use iced_runtime::core::alignment::Horizontal;
+use iced_runtime::core::image::Handle;
+use iced_runtime::futures::Subscription;
 use iced_runtime::Task;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::string::ToString;
 use std::sync::Arc;
-use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
+use tokio_stream::wrappers::BroadcastStream;
+use tracing::info;
+use tracing::log::debug;
 
 pub fn spawn_popup(receiver: BusReceiver) {
-    daemon(
-        Gradient::namespace,
-        Gradient::update,
-        Gradient::view,
-        Gradient::remove_id,
-    )
-    .subscription(Gradient::subscription)
-    .settings(MainSettings {
+    Gradient::run(Settings {
         layer_settings: LayerShellSettings {
-            size: Some((600, 300)),
-            anchor: Anchor::Top,
-            start_mode: StartMode::Active,
-            margin: (10, 10, 10, 10),
+            start_mode: StartMode::Background,
             ..Default::default()
         },
-        ..Default::default()
+        id: Some("main".to_string()),
+        flags: Flags {
+            bus_receiver: receiver,
+        },
+        fonts: Vec::new(),
+        default_font: Font::default(),
+        default_text_size: Pixels(16.0),
+        antialiasing: false,
+        virtual_keyboard_support: None,
     })
-    .theme(|_| {
-        Theme::Custom(Arc::new(Custom::new(
-            "Transparency".to_string(),
-            Palette {
-                background: Color::new(0.1, 0.1, 0.1, 0.7),
-                text: Default::default(),
-                primary: Default::default(),
-                success: Default::default(),
-                danger: Default::default(),
-            },
-        )))
-    })
-    .run_with(|| (Gradient::new(receiver), Task::none()))
-    .expect("TODO: panic message");
+    .unwrap()
 }
 
 #[derive(Debug)]
 struct Gradient {
-    ids: HashMap<window::Id, ()>,
+    ids: HashMap<window::Id, Notification>,
     // Has to be Option, since the Receiver stream needs to take ownership of it.
     receiver: BusReceiver,
     start: Color,
@@ -69,49 +58,69 @@ struct Gradient {
 enum Message {
     IcedEvent(Event),
     Notification(NotificationMsg),
+    NewWindow {
+        settings: NewLayerShellSettings,
+        id: window::Id,
+    },
 }
 
-impl Gradient {
-    fn new(receiver: BusReceiver) -> Self {
-        Self {
-            ids: HashMap::new(),
-            receiver,
-            start: Color::new(1.0, 0.0, 0.0, 0.5),
-            end: Color::new(0.0, 0.0, 1.0, 0.5),
-            angle: Radians(0.0),
-        }
+struct Flags {
+    bus_receiver: BusReceiver,
+}
+
+impl MultiApplication for Gradient {
+    type Executor = iced::executor::Default;
+    type Message = Message;
+    type Flags = Flags;
+    type Theme = Theme;
+
+    fn new(flags: Self::Flags) -> (Gradient, Task<Message>) {
+        (
+            Self {
+                ids: HashMap::new(),
+                receiver: flags.bus_receiver,
+                start: Color::new(1.0, 0.0, 0.0, 0.5),
+                end: Color::new(0.0, 0.0, 1.0, 0.5),
+                angle: Radians(0.0),
+            },
+            Task::none(),
+        )
     }
 
     fn namespace(&self) -> String {
         "rnd - Rust Notification Daemon".to_string()
     }
 
-    fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::IcedEvent(e) => {}
-            Message::AnchorChange { .. } => {}
-            Message::AnchorSizeChange { .. } => {}
-            Message::LayerChange { .. } => {}
-            Message::MarginChange { .. } => {}
-            Message::SizeChange { .. } => {}
-            Message::VirtualKeyboardPressed { .. } => {}
-            Message::NewLayerShell { .. } => {}
-            Message::NewPopUp { .. } => {}
-            Message::NewMenu { .. } => {}
-            Message::RemoveWindow(_) => {}
-            Message::ForgetLastOutput => {}
-            Message::Notification(msg) => {
-                println!("Received notification in UI: {:#?}", msg);
-                match msg {
-                    // TODO: Insert real ID here
-                    NotificationMsg::Notification(n) => self.ids.insert(n.id, ()).unwrap(),
-                }
-            }
-        }
-        Task::none()
+    fn remove_id(&mut self, id: window::Id) {
+        println!("Should remove {id}");
     }
 
-    fn view(&self, id: iced::window::Id) -> Element<Message> {
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Notification(msg) => {
+                match msg {
+                    // TODO: Insert real ID here
+                    NotificationMsg::Notification(n) => {
+                        info!("Received notification: {:#?}", n);
+                        self.ids.insert(n.id, n.clone());
+                        Task::done(Message::NewLayerShell {
+                            settings: NewLayerShellSettings {
+                                size: Some((500, 200)),
+                                anchor: Anchor::Top,
+                                layer: Layer::Top,
+                                margin: Some((100, 100, 100, 100)),
+                                ..Default::default()
+                            },
+                            id: n.id,
+                        })
+                    }
+                }
+            }
+            _ => Task::none(),
+        }
+    }
+
+    fn view(&self, id: window::Id) -> Element<Message> {
         let Self {
             ids,
             start,
@@ -119,30 +128,15 @@ impl Gradient {
             angle,
             ..
         } = self;
+        let mut column = Column::new();
         let gradient_boxes = self
             .ids
             .iter()
-            .map(|_| {
-                let image = Element::from(
-                    image(format!("{}/static/ferris.png", env!("CARGO_MANIFEST_DIR")))
-                        .content_fit(ContentFit::Contain),
-                );
-
-                let content = row![image, "Hello World!"];
-
-                container(content)
-                    .style(move |_theme| {
-                        let gradient = gradient::Linear::new(*angle)
-                            .add_stop(0.0, *start)
-                            .add_stop(1.0, *end);
-                        gradient.into()
-                    })
-                    .width(Fill)
-                    .height(Fill)
-                    .into()
-            })
+            .map(|(id, notification)| NotificationBox::render_notification_box(&notification))
             .collect::<Vec<_>>();
-        Element::from(Column::from_vec(gradient_boxes).into())
+        column = column.extend(gradient_boxes);
+
+        Element::from(column)
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -154,13 +148,43 @@ impl Gradient {
             ),
         ])
     }
-
-    fn remove_id(&mut self, id: window::Id) {
-        println!("Should remove {id}");
-    }
 }
 
-struct BusStream(BroadcastStream<NotificationMsg>);
+struct NotificationBox;
+
+impl NotificationBox {
+    fn render_notification_box<'a>(notification: &'a Notification) -> Element<'a, Message> {
+        let start = Color::new(1.0, 0.0, 0.0, 0.5);
+        let end = Color::new(0.0, 0.0, 1.0, 0.5);
+        let angle = Radians(0.0);
+        let image: iced::widget::Image<Handle> = image(PathBuf::from(format!(
+            "{}/static/ferris.png",
+            env!("CARGO_MANIFEST_DIR")
+        )))
+        .content_fit(ContentFit::Contain);
+        let image: Element<'_, Message, Theme, iced::Renderer> = Element::from(image);
+
+        let row = row![image, text!("{}", notification.summary.as_ref())];
+
+        let text = rich_text!(notification.app_name.as_ref()).font(Font {
+            weight: font::Weight::Bold,
+            ..Font::default()
+        });
+
+        let column = column![text, row].align_x(Horizontal::Center);
+
+        container(column)
+            .style(move |_theme| {
+                let gradient = gradient::Linear::new(angle)
+                    .add_stop(0.0, start)
+                    .add_stop(1.0, end);
+                gradient.into()
+            })
+            .width(Fill)
+            .height(Fill)
+            .into()
+    }
+}
 
 // Create a stream of messages from the notification receiver
 fn receive_messages(recv: BusReceiver) -> impl Stream<Item = NotificationMsg> {

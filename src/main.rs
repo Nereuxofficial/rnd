@@ -1,9 +1,10 @@
+#![feature(str_as_str)]
+
 mod notification_receiver;
 mod notification_ui;
 
 use crate::notification_receiver::{NotificationMsg, NotificationReceiver};
 use crate::notification_ui::spawn_popup;
-use std::string::ToString;
 use zbus::connection;
 
 pub type BusReceiver = tokio::sync::broadcast::Receiver<NotificationMsg>;
