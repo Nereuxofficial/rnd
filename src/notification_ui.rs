@@ -24,6 +24,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
 use tracing::log::debug;
 
+const HEIGHT: u32 = 100;
+
 pub fn spawn_popup(receiver: BusReceiver) {
     Gradient::run(Settings {
         layer_settings: LayerShellSettings {
@@ -105,10 +107,15 @@ impl MultiApplication for Gradient {
                         self.ids.insert(n.id, n.clone());
                         Task::done(Message::NewLayerShell {
                             settings: NewLayerShellSettings {
-                                size: Some((500, 200)),
+                                size: Some((500, HEIGHT)),
                                 anchor: Anchor::Top,
                                 layer: Layer::Top,
-                                margin: Some((100, 100, 100, 100)),
+                                margin: Some((
+                                    HEIGHT as i32 * self.ids.len() as i32,
+                                    100,
+                                    100,
+                                    100,
+                                )),
                                 ..Default::default()
                             },
                             id: n.id,
@@ -128,15 +135,14 @@ impl MultiApplication for Gradient {
             angle,
             ..
         } = self;
-        let mut column = Column::new();
-        let gradient_boxes = self
-            .ids
-            .iter()
-            .map(|(id, notification)| NotificationBox::render_notification_box(&notification))
-            .collect::<Vec<_>>();
-        column = column.extend(gradient_boxes);
 
-        Element::from(column)
+        let notification_box = self
+            .ids
+            .get(&id)
+            .map(|notification| NotificationBox::render_notification_box(notification))
+            .unwrap();
+
+        Element::from(column![notification_box])
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -164,7 +170,11 @@ impl NotificationBox {
         .content_fit(ContentFit::Contain);
         let image: Element<'_, Message, Theme, iced::Renderer> = Element::from(image);
 
-        let row = row![image, text!("{}", notification.summary.as_ref())];
+        let text_column = column![
+            text!("{}", notification.summary.as_ref()),
+            text!("{}", notification.body.as_ref())
+        ];
+        let row = row![image, text_column];
 
         let text = rich_text!(notification.app_name.as_ref()).font(Font {
             weight: font::Weight::Bold,
