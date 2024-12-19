@@ -15,7 +15,7 @@ pub type BusSender = tokio::sync::broadcast::Sender<NotificationMsg>;
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let (sender, recv) = tokio::sync::broadcast::channel(64);
-    let con = connection::Builder::session()?
+    let _con = connection::Builder::session()?
         .name("org.freedesktop.Notifications")
         .unwrap()
         .serve_at(

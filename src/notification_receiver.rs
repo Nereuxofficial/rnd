@@ -81,7 +81,7 @@ impl NotificationReceiver {
         Ok(id.to_string().parse().unwrap())
     }
 
-    pub async fn close_notification(&self, id: u32) -> fdo::Result<()> {
+    pub async fn close_notification(&self, _id: u32) -> fdo::Result<()> {
         Ok(())
     }
 

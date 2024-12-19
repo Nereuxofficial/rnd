@@ -3,8 +3,8 @@ use crate::notification_receiver::{Notification, NotificationMsg};
 use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
+use iced::widget::image;
 use iced::widget::{column, container, rich_text, text, Row};
-use iced::widget::{image, value};
 use iced::{event, font, ContentFit, Event, Font, Pixels};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::string::ToString;
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, info};
-use zbus::zvariant::{OwnedValue, Structure, Value};
+use tracing::info;
+use zbus::zvariant::OwnedValue;
 
 const HEIGHT: u32 = 100;
 
@@ -49,9 +49,6 @@ struct Gradient {
     ids: HashMap<window::Id, Notification>,
     // Has to be Option, since the Receiver stream needs to take ownership of it.
     receiver: BusReceiver,
-    start: Color,
-    end: Color,
-    angle: Radians,
 }
 
 #[to_layer_message(multi)]
@@ -81,9 +78,6 @@ impl MultiApplication for Gradient {
             Self {
                 ids: HashMap::new(),
                 receiver: flags.bus_receiver,
-                start: Color::new(1.0, 0.0, 0.0, 0.5),
-                end: Color::new(0.0, 0.0, 1.0, 0.5),
-                angle: Radians(0.0),
             },
             Task::none(),
         )
@@ -136,16 +130,9 @@ impl MultiApplication for Gradient {
     }
 
     fn view(&self, id: window::Id) -> Element<Message> {
-        let Self {
-            ids,
-            start,
-            end,
-            angle,
-            ..
-        } = self;
+        let Self { ids, .. } = self;
 
-        let notification_box = self
-            .ids
+        let notification_box = ids
             .get(&id)
             .map(|notification| NotificationBox::render_notification_box(notification))
             .unwrap();
@@ -168,6 +155,7 @@ struct NotificationBox;
 
 impl NotificationBox {
     fn get_image(notification: &Notification) -> Option<iced::widget::Image<Handle>> {
+        // TODO: Handle Order according to spec https://specifications.freedesktop.org/notification-spec/latest/icons-and-images.html
         let res: Option<&OwnedValue> = notification
             .hints
             .get("image-data")
