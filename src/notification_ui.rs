@@ -1,5 +1,5 @@
 use crate::image::Image;
-use crate::notification_receiver::{Notification, NotificationMsg};
+use crate::notification_receiver::{Expiry, Notification, NotificationMsg};
 use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
@@ -19,11 +19,14 @@ use iced_runtime::{Action, Task};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::string::ToString;
+use std::task::Poll;
+use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::info;
+use tracing::{debug, info};
 use zbus::zvariant::OwnedValue;
 
 const HEIGHT: u32 = 100;
+const TICK_LENGTH: u128 = 100;
 
 pub fn spawn_popup(receiver: BusReceiver) {
     Gradient::run(Settings {
@@ -61,6 +64,7 @@ enum Message {
         id: window::Id,
     },
     CloseWindow(window::Id),
+    TickElapsed,
 }
 
 struct Flags {
@@ -125,6 +129,24 @@ impl MultiApplication for Gradient {
                     }
                 }
             }
+            Message::TickElapsed => {
+                let mut tasks = vec![];
+                self.ids.retain(|id, n| match n.expire_timeout {
+                    Expiry::Never => true,
+                    Expiry::Miliseconds(ms) => {
+                        if Instant::now().duration_since(n.start_time).as_millis() > ms {
+                            info!("Removing notification: {}", n.summary);
+                            tasks.push(iced_runtime::task::effect(Action::Window(
+                                WindowAction::Close(*id),
+                            )));
+                            false
+                        } else {
+                            true
+                        }
+                    }
+                });
+                Task::batch(tasks)
+            }
             _ => Task::none(),
         }
     }
@@ -135,7 +157,10 @@ impl MultiApplication for Gradient {
         let notification_box = ids
             .get(&id)
             .map(|notification| NotificationBox::render_notification_box(notification))
-            .unwrap();
+            .unwrap_or_else(|| {
+                info!("Notification {} not found", id);
+                column![].into()
+            });
 
         Element::from(column![notification_box])
     }
@@ -143,11 +168,40 @@ impl MultiApplication for Gradient {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             event::listen().map(Message::IcedEvent),
+            Subscription::run(|| {
+                DelayStream {
+                    start: Instant::now(),
+                    time_between: TICK_LENGTH,
+                }
+                .map(|_| Message::TickElapsed)
+            }),
             Subscription::run_with_id(
                 1,
                 receive_messages(self.receiver.resubscribe()).map(Message::Notification),
             ),
         ])
+    }
+}
+
+struct DelayStream {
+    start: Instant,
+    time_between: u128,
+}
+
+impl Stream for DelayStream {
+    type Item = ();
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        if Instant::now().duration_since(self.start).as_millis() >= self.time_between {
+            self.get_mut().start = Instant::now();
+            Poll::Ready(Some(()))
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }
 
@@ -178,9 +232,9 @@ impl NotificationBox {
             None
         }
     }
-    fn render_notification_box<'a>(notification: &'a Notification) -> Element<'a, Message> {
-        let start = Color::new(1.0, 0.0, 0.0, 0.5);
-        let end = Color::new(0.0, 0.0, 1.0, 0.5);
+    fn render_notification_box(notification: &Notification) -> Element<Message> {
+        let end = Color::new(0.8, 0.8, 0.8, 0.5);
+        let start = Color::new(0.5, 0.5, 0.5, 0.5);
         let angle = Radians(0.0);
         let mut row = Row::new();
         if let Some(img) = Self::get_image(notification) {

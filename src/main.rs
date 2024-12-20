@@ -1,5 +1,3 @@
-#![feature(str_as_str)]
-
 mod image;
 mod notification_receiver;
 mod notification_ui;

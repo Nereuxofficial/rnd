@@ -3,11 +3,18 @@ use crate::BusSender;
 use iced::window;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use tokio::time::Instant;
 use zbus::object_server::SignalEmitter;
 use zbus::{fdo, interface, zvariant};
 
 pub struct NotificationReceiver {
     pub(crate) sender: BusSender,
+}
+
+#[derive(Clone, Debug)]
+pub enum Expiry {
+    Never,
+    Miliseconds(u128),
 }
 
 #[derive(Clone)]
@@ -21,7 +28,8 @@ pub struct Notification {
     pub body: Box<str>,
     pub actions: Vec<Box<str>>,
     pub hints: HashMap<Box<str>, zvariant::OwnedValue>,
-    pub expire_timeout: i32,
+    pub start_time: Instant,
+    pub expire_timeout: Expiry,
 }
 
 impl Debug for Notification {
@@ -59,6 +67,11 @@ impl NotificationReceiver {
         expire_timeout: i32,
     ) -> fdo::Result<u32> {
         let id = window::Id::unique();
+        let expire_timeout = match expire_timeout {
+            -1 => Expiry::Miliseconds(5000),
+            0 => Expiry::Never,
+            x => Expiry::Miliseconds(x as u128),
+        };
         self.sender
             .send(NotificationMsg::Notification(Notification {
                 id,
@@ -73,6 +86,7 @@ impl NotificationReceiver {
                     .map(|(s, val)| (Box::from(s), val.try_to_owned().unwrap()))
                     .collect(),
                 expire_timeout,
+                start_time: Instant::now(),
             }))
             .expect("Could not send message, UI task may have crashed");
         // Since id does not expose a way to get the inner u64, we need to do this dumb conversion
