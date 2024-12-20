@@ -4,7 +4,7 @@ use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
 use iced::widget::image;
-use iced::widget::{column, container, rich_text, text, Row};
+use iced::widget::{column, container, rich_text, text, Container, Row};
 use iced::{event, font, ContentFit, Event, Font, Pixels};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
@@ -22,14 +22,14 @@ use std::string::ToString;
 use std::task::Poll;
 use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, info};
+use tracing::info;
 use zbus::zvariant::OwnedValue;
 
-const HEIGHT: u32 = 100;
+const HEIGHT: u32 = 150;
 const TICK_LENGTH: u128 = 100;
 
 pub fn spawn_popup(receiver: BusReceiver) {
-    Gradient::run(Settings {
+    NotificationUi::run(Settings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
             ..Default::default()
@@ -48,7 +48,7 @@ pub fn spawn_popup(receiver: BusReceiver) {
 }
 
 #[derive(Debug)]
-struct Gradient {
+struct NotificationUi {
     ids: HashMap<window::Id, Notification>,
     // Has to be Option, since the Receiver stream needs to take ownership of it.
     receiver: BusReceiver,
@@ -71,13 +71,13 @@ struct Flags {
     bus_receiver: BusReceiver,
 }
 
-impl MultiApplication for Gradient {
+impl MultiApplication for NotificationUi {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Flags = Flags;
     type Theme = Theme;
 
-    fn new(flags: Self::Flags) -> (Gradient, Task<Message>) {
+    fn new(flags: Self::Flags) -> (NotificationUi, Task<Message>) {
         (
             Self {
                 ids: HashMap::new(),
@@ -88,7 +88,7 @@ impl MultiApplication for Gradient {
     }
 
     fn namespace(&self) -> String {
-        "rnd - Rust Notification Daemon".to_string()
+        "rnd".to_string()
     }
 
     fn remove_id(&mut self, id: window::Id) {
@@ -113,7 +113,7 @@ impl MultiApplication for Gradient {
                         self.ids.insert(n.id, n.clone());
                         Task::done(Message::NewLayerShell {
                             settings: NewLayerShellSettings {
-                                size: Some((500, HEIGHT)),
+                                size: Some((400, HEIGHT)),
                                 anchor: Anchor::Top,
                                 layer: Layer::Top,
                                 margin: Some((
@@ -135,7 +135,10 @@ impl MultiApplication for Gradient {
                     Expiry::Never => true,
                     Expiry::Miliseconds(ms) => {
                         if Instant::now().duration_since(n.start_time).as_millis() > ms {
-                            info!("Removing notification: {}", n.summary);
+                            info!(
+                                "Removing notification: {}: {} due to timeout of {}ms",
+                                n.app_name, n.summary, ms
+                            );
                             tasks.push(iced_runtime::task::effect(Action::Window(
                                 WindowAction::Close(*id),
                             )));
@@ -158,7 +161,7 @@ impl MultiApplication for Gradient {
             .get(&id)
             .map(|notification| NotificationBox::render_notification_box(notification))
             .unwrap_or_else(|| {
-                info!("Notification {} not found", id);
+                info!("Rendering: Notification {} not found", id);
                 column![].into()
             });
 
@@ -222,7 +225,8 @@ impl NotificationBox {
                 processed_img.pixels,
             ))
             .width(processed_img.width as f32)
-            .height(processed_img.height as f32);
+            .height(processed_img.height as f32)
+            .content_fit(ContentFit::Contain);
             Some(image)
         } else if !notification.app_icon.is_empty() {
             // TODO: Is there a try_from because i think this crashes if the path is invalid
@@ -233,26 +237,33 @@ impl NotificationBox {
         }
     }
     fn render_notification_box(notification: &Notification) -> Element<Message> {
-        let end = Color::new(0.8, 0.8, 0.8, 0.5);
-        let start = Color::new(0.5, 0.5, 0.5, 0.5);
+        let end = Color::new(0.05, 0.05, 0.05, 1.0);
+        let start = Color::new(0.20, 0.20, 0.20, 1.0);
         let angle = Radians(0.0);
         let mut row = Row::new();
-        if let Some(img) = Self::get_image(notification) {
-            row = row.push(Element::from(img.content_fit(ContentFit::ScaleDown)));
-        }
+        row = row.push_maybe(
+            Self::get_image(notification)
+                .map(Container::new)
+                .map(|c| c.align_x(Horizontal::Left)),
+        );
 
         let text_column = column![
-            text!("{}", notification.summary.as_ref()),
-            text!("{}", notification.body.as_ref())
-        ];
+            text!("{}", notification.summary.as_ref()).font(Font {
+                weight: font::Weight::Bold,
+                ..Font::default()
+            }),
+            text!("{}", notification.body.as_ref()).size(12)
+        ]
+        .spacing(3)
+        .align_x(Horizontal::Center);
         row = row.push(text_column);
 
         let text = rich_text!(notification.app_name.as_ref()).font(Font {
-            weight: font::Weight::Bold,
+            weight: font::Weight::Light,
             ..Font::default()
         });
 
-        let column = column![text, row].align_x(Horizontal::Center);
+        let column = column![row, text].align_x(Horizontal::Center);
 
         container(column)
             .style(move |_theme| {

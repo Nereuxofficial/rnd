@@ -2853,16 +2853,13 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 name = "rnd"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "iced",
  "iced_layershell",
  "iced_runtime",
- "serde",
  "tokio",
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
- "wayland-client",
  "zbus 5.1.1",
 ]
 
