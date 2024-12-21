@@ -3,9 +3,9 @@ use crate::notification_receiver::{Expiry, Notification, NotificationMsg};
 use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
-use iced::widget::image;
-use iced::widget::{column, container, rich_text, text, Container, Row};
-use iced::{event, font, ContentFit, Event, Font, Pixels, Shrink};
+use iced::widget::{column, container, text, Button, Container, Row};
+use iced::widget::{image, Column};
+use iced::{event, font, ContentFit, Event, Font, Pixels};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
 use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
@@ -23,6 +23,7 @@ use std::task::Poll;
 use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
+use zbus::export::ordered_stream::OrderedStreamExt;
 use zbus::zvariant::OwnedValue;
 
 const HEIGHT: u32 = 150;
@@ -99,6 +100,7 @@ impl MultiApplication for NotificationUi {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::RemoveWindow(id) => {
+                self.remove_id(id);
                 iced_runtime::task::effect(Action::Window(WindowAction::Close(id)))
             }
             Message::CloseWindow(id) => {
@@ -130,24 +132,26 @@ impl MultiApplication for NotificationUi {
                 }
             }
             Message::TickElapsed => {
-                let mut tasks = vec![];
-                self.ids.retain(|id, n| match n.expire_timeout {
-                    Expiry::Never => true,
-                    Expiry::Miliseconds(ms) => {
-                        if Instant::now().duration_since(n.start_time).as_millis() > ms {
-                            info!(
-                                "Removing notification: {}: {} due to timeout of {}ms",
-                                n.app_name, n.summary, ms
-                            );
-                            tasks.push(iced_runtime::task::effect(Action::Window(
-                                WindowAction::Close(*id),
-                            )));
-                            false
-                        } else {
-                            true
+                let tasks: Vec<Task<Message>> = self
+                    .ids
+                    .iter()
+                    .filter_map(|(id, n)| match n.expire_timeout {
+                        Expiry::Never => None,
+                        Expiry::Miliseconds(ms) => {
+                            if Instant::now().duration_since(n.start_time).as_millis() > ms {
+                                info!(
+                                    "Removing notification: {}: {} due to timeout of {}ms",
+                                    n.app_name, n.summary, ms
+                                );
+                                Some(iced_runtime::task::effect(Action::Window(
+                                    WindowAction::Close(*id),
+                                )))
+                            } else {
+                                None
+                            }
                         }
-                    }
-                });
+                    })
+                    .collect();
                 Task::batch(tasks)
             }
             _ => Task::none(),
@@ -197,7 +201,7 @@ impl Stream for DelayStream {
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    ) -> Poll<Option<Self::Item>> {
         if Instant::now().duration_since(self.start).as_millis() >= self.time_between {
             self.get_mut().start = Instant::now();
             Poll::Ready(Some(()))
@@ -247,7 +251,7 @@ impl NotificationBox {
                 .map(|c| c.max_width(150)),
         );
 
-        let text_column = column![
+        let mut text_column = column![
             text!("{}", notification.summary.as_ref()).font(Font {
                 weight: font::Weight::Bold,
                 ..Font::default()
@@ -259,8 +263,17 @@ impl NotificationBox {
         .align_x(Horizontal::Center)
         .width(Fill)
         .spacing(20);
-        row = row.push(text_column);
 
+        // Add Actions
+        // TODO: Actions should be parsed beforehand as they should be pairs
+        let actions = notification
+            .actions
+            .iter()
+            .map(|a| Button::new(text!("{}", a)).on_press(Message::CloseWindow(notification.id)))
+            .map(Element::new);
+        text_column = text_column.push(Row::from_iter(actions).spacing(10));
+
+        row = row.push(text_column);
         container(row)
             .style(move |_theme| {
                 let gradient = gradient::Linear::new(angle)
