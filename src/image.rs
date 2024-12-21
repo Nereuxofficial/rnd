@@ -1,6 +1,7 @@
 use zbus::zvariant::{OwnedValue, Structure, Value};
 use zbus::Error;
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct Image {
     pub width: i32,

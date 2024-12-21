@@ -5,7 +5,7 @@ use iced::futures::Stream;
 use iced::futures::StreamExt;
 use iced::widget::image;
 use iced::widget::{column, container, rich_text, text, Container, Row};
-use iced::{event, font, ContentFit, Event, Font, Pixels};
+use iced::{event, font, ContentFit, Event, Font, Pixels, Shrink};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
 use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
@@ -244,7 +244,7 @@ impl NotificationBox {
         row = row.push_maybe(
             Self::get_image(notification)
                 .map(Container::new)
-                .map(|c| c.align_x(Horizontal::Left)),
+                .map(|c| c.max_width(150)),
         );
 
         let text_column = column![
@@ -254,16 +254,17 @@ impl NotificationBox {
             }),
             text!("{}", notification.body.as_ref()).size(12)
         ]
-        .spacing(3)
         .align_x(Horizontal::Center);
         row = row.push(text_column);
 
-        let text = rich_text!(notification.app_name.as_ref()).font(Font {
-            weight: font::Weight::Light,
-            ..Font::default()
-        });
+        let text = rich_text!(notification.app_name.as_ref())
+            .font(Font {
+                weight: font::Weight::Light,
+                ..Font::default()
+            })
+            .align_x(Horizontal::Center);
 
-        let column = column![row, text].align_x(Horizontal::Center);
+        let column = column![row, text];
 
         container(column)
             .style(move |_theme| {
