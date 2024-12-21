@@ -48,6 +48,11 @@ impl TryFrom<OwnedValue> for Image {
                 .map(|a| a.iter().map(|v| u8::try_from(v.clone()).unwrap()))
                 .unwrap()
                 .collect();
+            let pixels = if pixels.len() == (width * height * 4) as usize {
+                pixels
+            } else {
+                rbg_to_rgba(pixels)
+            };
 
             Ok(Self {
                 width,
@@ -56,7 +61,7 @@ impl TryFrom<OwnedValue> for Image {
                 has_alpha,
                 bits_per_sample,
                 channels,
-                pixels: rbg_to_rgba(pixels),
+                pixels,
             })
         } else {
             Err(Error::Failure("Image Data not valid".to_string()))

@@ -252,21 +252,16 @@ impl NotificationBox {
                 weight: font::Weight::Bold,
                 ..Font::default()
             }),
-            text!("{}", notification.body.as_ref()).size(12)
+            text!("{}", notification.body.as_ref())
+                .size(12)
+                .align_x(Horizontal::Center)
         ]
-        .align_x(Horizontal::Center);
+        .align_x(Horizontal::Center)
+        .width(Fill)
+        .spacing(20);
         row = row.push(text_column);
 
-        let text = rich_text!(notification.app_name.as_ref())
-            .font(Font {
-                weight: font::Weight::Light,
-                ..Font::default()
-            })
-            .align_x(Horizontal::Center);
-
-        let column = column![row, text];
-
-        container(column)
+        container(row)
             .style(move |_theme| {
                 let gradient = gradient::Linear::new(angle)
                     .add_stop(0.0, start)
