@@ -1,10 +1,12 @@
 use crate::image::Image;
-use crate::notification_receiver::{Expiry, Notification, NotificationMsg};
+use crate::notification_receiver::{
+    Expiry, Notification, NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
+};
 use crate::BusReceiver;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
+use iced::widget::image;
 use iced::widget::{column, container, text, Button, Container, Row};
-use iced::widget::{image, Column};
 use iced::{event, font, ContentFit, Event, Font, Pixels};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians, Theme};
@@ -23,13 +25,13 @@ use std::task::Poll;
 use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
-use zbus::export::ordered_stream::OrderedStreamExt;
+use zbus::object_server::InterfaceRef;
 use zbus::zvariant::OwnedValue;
 
 const HEIGHT: u32 = 150;
 const TICK_LENGTH: u128 = 100;
 
-pub fn spawn_popup(receiver: BusReceiver) {
+pub fn spawn_popup(bus_receiver: BusReceiver, reply_handle: InterfaceRef<NotificationReceiver>) {
     NotificationUi::run(Settings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
@@ -37,7 +39,8 @@ pub fn spawn_popup(receiver: BusReceiver) {
         },
         id: Some("main".to_string()),
         flags: Flags {
-            bus_receiver: receiver,
+            bus_receiver,
+            reply_handle,
         },
         fonts: Vec::new(),
         default_font: Font::default(),
@@ -48,11 +51,11 @@ pub fn spawn_popup(receiver: BusReceiver) {
     .unwrap()
 }
 
-#[derive(Debug)]
 struct NotificationUi {
     ids: HashMap<window::Id, Notification>,
     // Has to be Option, since the Receiver stream needs to take ownership of it.
     receiver: BusReceiver,
+    reply_handle: InterfaceRef<NotificationReceiver>,
 }
 
 #[to_layer_message(multi)]
@@ -64,12 +67,17 @@ enum Message {
         settings: NewLayerShellSettings,
         id: window::Id,
     },
+    ActionInvocation {
+        id: window::Id,
+        action: String,
+    },
     CloseWindow(window::Id),
     TickElapsed,
 }
 
 struct Flags {
     bus_receiver: BusReceiver,
+    reply_handle: InterfaceRef<NotificationReceiver>,
 }
 
 impl MultiApplication for NotificationUi {
@@ -83,6 +91,7 @@ impl MultiApplication for NotificationUi {
             Self {
                 ids: HashMap::new(),
                 receiver: flags.bus_receiver,
+                reply_handle: flags.reply_handle,
             },
             Task::none(),
         )
@@ -106,6 +115,18 @@ impl MultiApplication for NotificationUi {
             Message::CloseWindow(id) => {
                 self.remove_id(id);
                 iced_runtime::task::effect(Action::Window(WindowAction::Close(id)))
+            }
+            Message::ActionInvocation { id, action } => {
+                info!("Action invocation: {} on {}", action, id);
+                // Call the method on the reply_handle
+                let reply_handle = self.reply_handle.clone();
+                Task::future(async move {
+                    reply_handle
+                        .action_invoked(id.to_string().parse().unwrap(), action.as_str())
+                        .await
+                        .expect("Failed to send action invocation");
+                    Message::CloseWindow(id)
+                })
             }
             Message::Notification(msg) => {
                 match msg {
@@ -265,11 +286,15 @@ impl NotificationBox {
         .spacing(20);
 
         // Add Actions
-        // TODO: Actions should be parsed beforehand as they should be pairs
         let actions = notification
             .actions
             .iter()
-            .map(|a| Button::new(text!("{}", a)).on_press(Message::CloseWindow(notification.id)))
+            .map(|(name, action)| {
+                Button::new(text!("{}", name)).on_press(Message::ActionInvocation {
+                    id: notification.id,
+                    action: action.to_string(),
+                })
+            })
             .map(Element::new);
         text_column = text_column.push(Row::from_iter(actions).spacing(10));
 

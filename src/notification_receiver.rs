@@ -1,6 +1,7 @@
 //! See <https://specifications.freedesktop.org/notification-spec/latest/protocol.html>
 use crate::BusSender;
 use iced::window;
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
@@ -26,7 +27,7 @@ pub struct Notification {
     pub app_icon: Box<str>,
     pub summary: Box<str>,
     pub body: Box<str>,
-    pub actions: Vec<Box<str>>,
+    pub actions: HashMap<Box<str>, Box<str>>,
     pub hints: HashMap<Box<str>, zvariant::OwnedValue>,
     pub start_time: Instant,
     pub expire_timeout: Expiry,
@@ -72,6 +73,11 @@ impl NotificationReceiver {
             0 => Expiry::Never,
             x => Expiry::Miliseconds(x as u128),
         };
+        let actions = actions
+            .into_iter()
+            .tuple_windows()
+            .map(|(key, value): (&str, &str)| (Box::from(key), Box::from(value)))
+            .collect::<HashMap<Box<str>, Box<str>>>();
         self.sender
             .send(NotificationMsg::Notification(Notification {
                 id,
@@ -80,7 +86,7 @@ impl NotificationReceiver {
                 app_icon: Box::from(app_icon),
                 summary: Box::from(summary),
                 body: Box::from(body),
-                actions: actions.iter().map(|&s| Box::from(s)).collect(),
+                actions,
                 hints: hints
                     .into_iter()
                     .map(|(s, val)| (Box::from(s), val.try_to_owned().unwrap()))
