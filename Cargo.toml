@@ -14,6 +14,8 @@ iced_runtime = { version = "0.13.2", features = ["multi-window"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 itertools = "0.13.0"
 color-eyre = "0.6.3"
+serde = { version = "1.0.216", features = ["derive"] }
+serde_json = "1.0.134"
 
 
 # Enable max optimizations for dependencies, but not for our code:

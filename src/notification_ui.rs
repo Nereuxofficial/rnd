@@ -1,6 +1,8 @@
 use crate::image::Image;
+use crate::notification::Expiry;
+use crate::notification::Notification;
 use crate::notification_receiver::{
-    Expiry, Notification, NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
+    NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
 };
 use crate::BusReceiver;
 use iced::futures::Stream;
@@ -155,7 +157,11 @@ impl MultiApplication for NotificationUi {
                     .filter_map(|(id, n)| match n.expire_timeout {
                         Expiry::Never => None,
                         Expiry::Miliseconds(ms) => {
-                            if Instant::now().duration_since(n.start_time).as_millis() > ms {
+                            if Instant::now()
+                                .duration_since(n.start_time.into())
+                                .as_millis()
+                                > ms
+                            {
                                 info!(
                                     "Removing notification: {}: {} due to timeout of {}ms",
                                     n.app_name, n.summary, ms

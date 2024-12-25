@@ -1,4 +1,5 @@
 mod image;
+mod notification;
 mod notification_receiver;
 mod notification_ui;
 
