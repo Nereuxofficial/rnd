@@ -43,22 +43,30 @@ impl NotificationReceiver {
             .tuple_windows()
             .map(|(key, value): (&str, &str)| (Box::from(key), Box::from(value)))
             .collect::<HashMap<Box<str>, Box<str>>>();
+        let notification = Notification {
+            id,
+            app_name: Box::from(app_name),
+            replaces_id,
+            app_icon: Box::from(app_icon),
+            summary: Box::from(summary),
+            body: Box::from(body),
+            actions,
+            hints: hints
+                .into_iter()
+                .map(|(s, val)| (Box::from(s), val.try_to_owned().unwrap()))
+                .collect(),
+            expire_timeout,
+            start_time: Instant::now(),
+        };
+        if std::env::var("LOG").is_ok() {
+            std::fs::write(
+                format!("tests/{}-{}.json", app_name, id),
+                serde_json::to_string(&notification).unwrap(),
+            )
+            .unwrap();
+        }
         self.sender
-            .send(NotificationMsg::Notification(Notification {
-                id,
-                app_name: Box::from(app_name),
-                replaces_id,
-                app_icon: Box::from(app_icon),
-                summary: Box::from(summary),
-                body: Box::from(body),
-                actions,
-                hints: hints
-                    .into_iter()
-                    .map(|(s, val)| (Box::from(s), val.try_to_owned().unwrap()))
-                    .collect(),
-                expire_timeout,
-                start_time: Instant::now(),
-            }))
+            .send(NotificationMsg::Notification(notification))
             .expect("Could not send message, UI task may have crashed");
         // Since id does not expose a way to get the inner u64, we need to do this dumb conversion
         // This is a lossy conversion,
