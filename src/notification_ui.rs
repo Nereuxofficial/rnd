@@ -108,11 +108,7 @@ impl MultiApplication for NotificationUi {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::RemoveWindow(id) => {
-                self.remove_id(id);
-                iced_runtime::task::effect(Action::Window(WindowAction::Close(id)))
-            }
-            Message::CloseWindow(id) => {
+            Message::RemoveWindow(id) | Message::CloseWindow(id) => {
                 self.remove_id(id);
                 iced_runtime::task::effect(Action::Window(WindowAction::Close(id)))
             }
