@@ -2944,6 +2944,8 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols",
  "zbus 5.1.1",
 ]
 
