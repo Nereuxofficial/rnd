@@ -139,30 +139,28 @@ impl NotificationUi {
                 }
             },
             Message::TickElapsed => {
-                let tasks: Vec<Task<Message>> = self
-                    .ids
-                    .iter()
-                    .filter_map(|(id, n)| match n.expire_timeout {
-                        Expiry::Never => None,
-                        Expiry::Miliseconds(ms) => {
-                            if Instant::now()
-                                .duration_since(n.start_time.into())
-                                .as_millis()
-                                > ms
-                            {
-                                info!(
-                                    "Removing notification: {}: {} due to timeout of {}ms",
-                                    n.app_name, n.summary, ms
-                                );
-                                Some(iced_runtime::task::effect(Action::Window(
-                                    WindowAction::Close(*id),
-                                )))
-                            } else {
-                                None
-                            }
+                let mut tasks: Vec<Task<Message>> = vec![];
+                self.ids.retain(|id, n| match n.expire_timeout {
+                    Expiry::Never => true,
+                    Expiry::Miliseconds(ms) => {
+                        if Instant::now()
+                            .duration_since(n.start_time.into())
+                            .as_millis()
+                            > ms
+                        {
+                            info!(
+                                "Removing notification: {}: {} due to timeout of {}ms",
+                                n.app_name, n.summary, ms
+                            );
+                            tasks.push(iced_runtime::task::effect(Action::Window(
+                                WindowAction::Close(*id),
+                            )));
+                            false
+                        } else {
+                            true
                         }
-                    })
-                    .collect();
+                    }
+                });
                 Task::batch(tasks)
             }
             _ => Task::none(),
