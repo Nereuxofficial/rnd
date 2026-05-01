@@ -16,8 +16,8 @@ pub type BusSender = tokio::sync::broadcast::Sender<NotificationMsg>;
 pub async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
-    let (sender, recv) = tokio::sync::broadcast::channel(64);
-    let dbus_service = NotificationReceiver { sender };
+    let (sender, _) = tokio::sync::broadcast::channel(64);
+    let dbus_service = NotificationReceiver { sender: sender.clone() };
     let con = connection::Builder::session()?
         .name("org.freedesktop.Notifications")
         .unwrap()
@@ -28,7 +28,7 @@ pub async fn main() -> Result<()> {
             "Could not register notification daemon. Try to kill your running notification daemon.",
         );
     spawn_popup(
-        recv,
+        sender,
         con.object_server()
             .interface("/org/freedesktop/Notifications")
             .await?,

@@ -4,17 +4,18 @@ use crate::notification::Notification;
 use crate::notification_receiver::{
     NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
 };
-use crate::BusReceiver;
+use crate::BusSender;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
 use iced::widget::image;
 use iced::widget::{column, container, text, Button, Container, Row};
-use iced::{event, font, ContentFit, Event, Font, Pixels};
+use iced::{event, font, ContentFit, Event, Font};
 use iced::{gradient, window};
-use iced::{Color, Element, Fill, Radians, Theme};
+use iced::{Color, Element, Fill, Radians};
+use iced_layershell::daemon;
 use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
-use iced_layershell::settings::{LayerShellSettings, Settings, StartMode};
-use iced_layershell::{to_layer_message, MultiApplication};
+use iced_layershell::settings::{LayerShellSettings, StartMode};
+use iced_layershell::to_layer_message;
 use iced_runtime::core::alignment::Horizontal;
 use iced_runtime::core::image::Handle;
 use iced_runtime::futures::Subscription;
@@ -23,9 +24,19 @@ use iced_runtime::{Action, Task};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::string::ToString;
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use tokio::sync::broadcast::Sender as BroadcastSender;
 use tokio::time::Instant;
 use tokio_stream::wrappers::BroadcastStream;
+
+struct HashableSender(BroadcastSender<NotificationMsg>);
+
+impl std::hash::Hash for HashableSender {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        1u64.hash(state);
+    }
+}
 use tracing::info;
 use zbus::object_server::InterfaceRef;
 use zbus::zvariant::OwnedValue;
@@ -33,30 +44,41 @@ use zbus::zvariant::OwnedValue;
 const HEIGHT: u32 = 150;
 const TICK_LENGTH: u128 = 100;
 
-pub fn spawn_popup(bus_receiver: BusReceiver, reply_handle: InterfaceRef<NotificationReceiver>) {
-    NotificationUi::run(Settings {
-        layer_settings: LayerShellSettings {
-            start_mode: StartMode::Background,
-            ..Default::default()
+pub fn spawn_popup(bus_sender: BusSender, reply_handle: InterfaceRef<NotificationReceiver>) {
+    let bus_sender = Arc::new(Mutex::new(Some(bus_sender)));
+
+    daemon(
+        move || {
+            let sender = bus_sender
+                .lock()
+                .unwrap()
+                .take()
+                .expect("boot called twice");
+            (
+                NotificationUi {
+                    ids: HashMap::new(),
+                    sender,
+                    reply_handle: reply_handle.clone(),
+                },
+                Task::none(),
+            )
         },
-        id: Some("main".to_string()),
-        flags: Flags {
-            bus_receiver,
-            reply_handle,
-        },
-        fonts: Vec::new(),
-        default_font: Font::default(),
-        default_text_size: Pixels(16.0),
-        antialiasing: false,
-        virtual_keyboard_support: None,
+        "rnd",
+        NotificationUi::update,
+        NotificationUi::view,
+    )
+    .subscription(NotificationUi::subscription)
+    .layer_settings(LayerShellSettings {
+        start_mode: StartMode::Background,
+        ..Default::default()
     })
+    .run()
     .unwrap()
 }
 
 struct NotificationUi {
     ids: HashMap<window::Id, Notification>,
-    // Has to be Option, since the Receiver stream needs to take ownership of it.
-    receiver: BusReceiver,
+    sender: BusSender,
     reply_handle: InterfaceRef<NotificationReceiver>,
 }
 
@@ -77,32 +99,7 @@ enum Message {
     TickElapsed,
 }
 
-struct Flags {
-    bus_receiver: BusReceiver,
-    reply_handle: InterfaceRef<NotificationReceiver>,
-}
-
-impl MultiApplication for NotificationUi {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Flags = Flags;
-    type Theme = Theme;
-
-    fn new(flags: Self::Flags) -> (NotificationUi, Task<Message>) {
-        (
-            Self {
-                ids: HashMap::new(),
-                receiver: flags.bus_receiver,
-                reply_handle: flags.reply_handle,
-            },
-            Task::none(),
-        )
-    }
-
-    fn namespace(&self) -> String {
-        "rnd".to_string()
-    }
-
+impl NotificationUi {
     fn remove_id(&mut self, id: window::Id) {
         info!("Removing id: {}", id);
         self.ids.remove(&id);
@@ -116,7 +113,6 @@ impl MultiApplication for NotificationUi {
             }
             Message::ActionInvocation { id, action } => {
                 info!("Action invocation: {} on {}", action, id);
-                // Call the method on the reply_handle
                 let reply_handle = self.reply_handle.clone();
                 Task::future(async move {
                     reply_handle
@@ -126,30 +122,22 @@ impl MultiApplication for NotificationUi {
                     Message::CloseWindow(id)
                 })
             }
-            Message::Notification(msg) => {
-                match msg {
-                    // TODO: Insert real ID here
-                    NotificationMsg::Notification(n) => {
-                        info!("Received notification: {:#?}", n);
-                        self.ids.insert(n.id, n.clone());
-                        Task::done(Message::NewLayerShell {
-                            settings: NewLayerShellSettings {
-                                size: Some((400, HEIGHT)),
-                                anchor: Anchor::Top,
-                                layer: Layer::Top,
-                                margin: Some((
-                                    HEIGHT as i32 * self.ids.len() as i32,
-                                    100,
-                                    100,
-                                    100,
-                                )),
-                                ..Default::default()
-                            },
-                            id: n.id,
-                        })
-                    }
+            Message::Notification(msg) => match msg {
+                NotificationMsg::Notification(n) => {
+                    info!("Received notification: {:#?}", n);
+                    self.ids.insert(n.id, n.clone());
+                    Task::done(Message::NewLayerShell {
+                        settings: NewLayerShellSettings {
+                            size: Some((400, HEIGHT)),
+                            anchor: Anchor::Top,
+                            layer: Layer::Top,
+                            margin: Some((HEIGHT as i32 * self.ids.len() as i32, 100, 100, 100)),
+                            ..Default::default()
+                        },
+                        id: n.id,
+                    })
                 }
-            }
+            },
             Message::TickElapsed => {
                 let tasks: Vec<Task<Message>> = self
                     .ids
@@ -182,9 +170,8 @@ impl MultiApplication for NotificationUi {
     }
 
     fn view(&self, id: window::Id) -> Element<Message> {
-        let Self { ids, .. } = self;
-
-        let notification_box = ids
+        let notification_box = self
+            .ids
             .get(&id)
             .map(|notification| NotificationBox::render_notification_box(notification))
             .unwrap_or_else(|| {
@@ -205,12 +192,18 @@ impl MultiApplication for NotificationUi {
                 }
                 .map(|_| Message::TickElapsed)
             }),
-            Subscription::run_with_id(
-                1,
-                receive_messages(self.receiver.resubscribe()).map(Message::Notification),
-            ),
+            Subscription::run_with(
+                HashableSender(self.sender.clone()),
+                build_notification_stream,
+            )
+            .map(|result| result.unwrap())
+            .map(Message::Notification),
         ])
     }
+}
+
+fn build_notification_stream(sender: &HashableSender) -> BroadcastStream<NotificationMsg> {
+    BroadcastStream::new(sender.0.subscribe())
 }
 
 struct DelayStream {
@@ -263,16 +256,16 @@ impl NotificationBox {
             None
         }
     }
+
     fn render_notification_box(notification: &Notification) -> Element<Message> {
-        let end = Color::new(0.05, 0.05, 0.05, 1.0);
-        let start = Color::new(0.20, 0.20, 0.20, 1.0);
+        let end = Color::from_rgba(0.05, 0.05, 0.05, 1.0);
+        let start = Color::from_rgba(0.20, 0.20, 0.20, 1.0);
         let angle = Radians(0.0);
         let mut row = Row::new();
-        row = row.push_maybe(
-            Self::get_image(notification)
-                .map(Container::new)
-                .map(|c| c.max_width(150)),
-        );
+
+        if let Some(img) = Self::get_image(notification) {
+            row = row.push(Container::new(img).max_width(150));
+        }
 
         let mut text_column = column![
             text!("{}", notification.summary.as_ref()).font(Font {
@@ -287,7 +280,6 @@ impl NotificationBox {
         .width(Fill)
         .spacing(20);
 
-        // Add Actions
         let actions = notification
             .actions
             .iter()
@@ -312,9 +304,4 @@ impl NotificationBox {
             .height(Fill)
             .into()
     }
-}
-
-// Create a stream of messages from the notification receiver
-fn receive_messages(recv: BusReceiver) -> impl Stream<Item = NotificationMsg> {
-    BroadcastStream::new(recv).map(|msg| msg.unwrap())
 }
