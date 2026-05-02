@@ -5,10 +5,17 @@ use crate::notification_receiver::{
     NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
 };
 use crate::BusSender;
+use iced::border;
+use iced::border::Radius;
 use iced::futures::Stream;
 use iced::futures::StreamExt;
 use iced::widget::image;
+use iced::widget::progress_bar;
 use iced::widget::{column, container, text, Button, Container, Row};
+use iced::Background;
+use iced::Border;
+use iced::Point;
+use iced::Size;
 use iced::{event, font, ContentFit, Event, Font};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians};
@@ -67,6 +74,10 @@ pub fn spawn_popup(bus_sender: BusSender, reply_handle: InterfaceRef<Notificatio
         NotificationUi::update,
         NotificationUi::view,
     )
+    .style(|_, _| iced::theme::Style {
+        background_color: Color::TRANSPARENT,
+        text_color: Color::WHITE,
+    })
     .subscription(NotificationUi::subscription)
     .layer_settings(LayerShellSettings {
         start_mode: StartMode::Background,
@@ -124,7 +135,7 @@ impl NotificationUi {
             }
             Message::Notification(msg) => match msg {
                 NotificationMsg::Notification(n) => {
-                    info!("Received notification: {:#?}", n);
+                    info!("Received notification: {n:#?}");
                     self.ids.insert(n.id, n.clone());
                     Task::done(Message::NewLayerShell {
                         settings: NewLayerShellSettings {
@@ -255,12 +266,8 @@ impl NotificationBox {
         }
     }
 
-    fn render_notification_box(notification: &Notification) -> Element<Message> {
-        let end = Color::from_rgba(0.05, 0.05, 0.05, 1.0);
-        let start = Color::from_rgba(0.20, 0.20, 0.20, 1.0);
-        let angle = Radians(0.0);
+    fn render_notification_box(notification: &'_ Notification) -> Element<'_, Message> {
         let mut row = Row::new();
-
         if let Some(img) = Self::get_image(notification) {
             row = row.push(Container::new(img).max_width(150));
         }
@@ -291,12 +298,20 @@ impl NotificationBox {
         text_column = text_column.push(Row::from_iter(actions).spacing(10));
 
         row = row.push(text_column);
-        container(row)
+        let corner_radius = &10;
+        // TODO: Use accent color from image
+        let progress_bar = container(progress_bar(0.0..=0.0, 0.0).style(|_: &iced::Theme| {
+            iced::widget::progress_bar::Style {
+                bar: Background::Color(Color::WHITE),
+                background: Background::Color(Color::WHITE),
+                border: Border::default().rounded(Radius::new(*corner_radius)),
+            }
+        }));
+
+        container(column![progress_bar, row])
             .style(move |_theme| {
-                let gradient = gradient::Linear::new(angle)
-                    .add_stop(0.0, start)
-                    .add_stop(1.0, end);
-                gradient.into()
+                container::Style::from(Color::BLACK)
+                    .border(Border::default().rounded(Radius::new(*corner_radius)))
             })
             .width(Fill)
             .height(Fill)

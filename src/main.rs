@@ -2,7 +2,6 @@ mod image;
 mod notification;
 mod notification_receiver;
 mod notification_ui;
-mod wayland;
 
 use crate::notification_receiver::{NotificationMsg, NotificationReceiver};
 use crate::notification_ui::spawn_popup;
@@ -17,7 +16,9 @@ pub async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install()?;
     let (sender, _) = tokio::sync::broadcast::channel(64);
-    let dbus_service = NotificationReceiver { sender: sender.clone() };
+    let dbus_service = NotificationReceiver {
+        sender: sender.clone(),
+    };
     let con = connection::Builder::session()?
         .name("org.freedesktop.Notifications")
         .unwrap()
