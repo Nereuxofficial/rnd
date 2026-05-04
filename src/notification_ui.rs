@@ -5,6 +5,7 @@ use crate::notification_receiver::{
     NotificationMsg, NotificationReceiver, NotificationReceiverSignals,
 };
 use crate::BusSender;
+use iced::alignment::Vertical;
 use iced::border;
 use iced::border::Radius;
 use iced::futures::Stream;
@@ -14,6 +15,8 @@ use iced::widget::progress_bar;
 use iced::widget::{column, container, text, Button, Container, Row};
 use iced::Background;
 use iced::Border;
+use iced::Length;
+use iced::Padding;
 use iced::Point;
 use iced::Size;
 use iced::{event, font, ContentFit, Event, Font};
@@ -267,9 +270,20 @@ impl NotificationBox {
     }
 
     fn render_notification_box(notification: &'_ Notification) -> Element<'_, Message> {
+        // TODO: Use accent color from image
+        let accent_color = Color::from_rgb(0.80, 0.1, 0.1);
+
         let mut row = Row::new();
         if let Some(img) = Self::get_image(notification) {
-            row = row.push(Container::new(img).max_width(150));
+            row = row.push(
+                Container::new(img)
+                    .max_width(100)
+                    .padding(Padding::new(10.))
+                    .style(move |_| {
+                        iced::widget::container::Style::default()
+                            .border(Border::default().rounded(15))
+                    }),
+            );
         }
 
         let mut text_column = column![
@@ -281,17 +295,17 @@ impl NotificationBox {
                 .size(12)
                 .align_x(Horizontal::Center)
         ]
-        .align_x(Horizontal::Center)
+        .align_x(Horizontal::Left)
         .width(Fill)
         .spacing(20);
 
         let actions = notification
             .actions
             .iter()
-            .map(|(name, action)| {
-                Button::new(text!("{}", name)).on_press(Message::ActionInvocation {
+            .map(|(name, text)| {
+                Button::new(text!("{}", text)).on_press(Message::ActionInvocation {
                     id: notification.id,
-                    action: action.to_string(),
+                    action: text.to_string(),
                 })
             })
             .map(Element::new);
@@ -299,19 +313,25 @@ impl NotificationBox {
 
         row = row.push(text_column);
         let corner_radius = &10;
-        // TODO: Use accent color from image
-        let progress_bar = container(progress_bar(0.0..=0.0, 0.0).style(|_: &iced::Theme| {
-            iced::widget::progress_bar::Style {
-                bar: Background::Color(Color::WHITE),
-                background: Background::Color(Color::WHITE),
-                border: Border::default().rounded(Radius::new(*corner_radius)),
-            }
-        }));
+        let progress_bar = container(progress_bar(0.0..=0.0, 0.0).girth(Length::Fixed(4.)).style(
+            move |_: &iced::Theme| {
+                iced::widget::progress_bar::Style {
+                    bar: Background::Color(accent_color),
+                    background: Background::Color(accent_color),
+                    border: Border::default()
+                        .rounded(Radius::new(*corner_radius))
+                        .color(accent_color),
+                }
+            },
+        ));
 
         container(column![progress_bar, row])
             .style(move |_theme| {
-                container::Style::from(Color::BLACK)
-                    .border(Border::default().rounded(Radius::new(*corner_radius)))
+                container::Style::from(Color::BLACK).border(
+                    Border::default()
+                        .color(accent_color)
+                        .rounded(Radius::new(*corner_radius)),
+                )
             })
             .width(Fill)
             .height(Fill)
