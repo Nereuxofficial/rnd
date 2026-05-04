@@ -23,7 +23,7 @@ use iced::{event, font, ContentFit, Event, Font};
 use iced::{gradient, window};
 use iced::{Color, Element, Fill, Radians};
 use iced_layershell::daemon;
-use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings};
+use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings};
 use iced_layershell::settings::{LayerShellSettings, StartMode};
 use iced_layershell::to_layer_message;
 use iced_runtime::core::alignment::Horizontal;
@@ -143,9 +143,15 @@ impl NotificationUi {
                     Task::done(Message::NewLayerShell {
                         settings: NewLayerShellSettings {
                             size: Some((400, HEIGHT)),
-                            anchor: Anchor::Top,
+                            anchor: Anchor::Top | Anchor::Right,
                             layer: Layer::Top,
-                            margin: Some((HEIGHT as i32 * self.ids.len() as i32, 100, 100, 100)),
+                            margin: Some((
+                                HEIGHT as i32 * self.ids.len() as i32 - HEIGHT as i32 + 50,
+                                100,
+                                100,
+                                100,
+                            )),
+                            keyboard_interactivity: KeyboardInteractivity::None,
                             ..Default::default()
                         },
                         id: n.id,
