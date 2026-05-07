@@ -1,4 +1,5 @@
 //! See <https://specifications.freedesktop.org/notification-spec/latest/protocol.html>
+use crate::action::Action;
 use crate::notification::{Expiry, Notification};
 use crate::BusSender;
 use iced::window;
@@ -28,7 +29,7 @@ impl NotificationReceiver {
         app_icon: &str,
         summary: &str,
         body: &str,
-        actions: Vec<&str>,
+        mut actions: Vec<&str>,
         hints: HashMap<&str, zvariant::Value<'_>>,
         expire_timeout: i32,
     ) -> fdo::Result<u32> {
@@ -38,11 +39,20 @@ impl NotificationReceiver {
             0 => Expiry::Never,
             x => Expiry::Miliseconds(x as u128),
         };
+        let default_action: Option<Action> =
+            if let Some((default_index, _)) = actions.iter().find_position(|x| **x == "default") {
+                actions.remove(default_index);
+                serde_json::from_str(actions.remove(default_index)).ok()
+            } else {
+                None
+            };
         let actions = actions
             .into_iter()
             .tuple_windows()
-            .map(|(key, value): (&str, &str)| (Box::from(key), Box::from(value)))
-            .collect::<HashMap<Box<str>, Box<str>>>();
+            .map(|(key, value): (&str, &str)| {
+                (Box::from(key), serde_json::from_str(value).unwrap())
+            })
+            .collect::<HashMap<Box<str>, Action>>();
         let notification = Notification {
             id,
             app_name: Box::from(app_name),
@@ -50,6 +60,7 @@ impl NotificationReceiver {
             app_icon: Box::from(app_icon),
             summary: Box::from(summary),
             body: Box::from(body),
+            default_action,
             actions,
             hints: hints
                 .into_iter()

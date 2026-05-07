@@ -107,7 +107,7 @@ enum Message {
     },
     ActionInvocation {
         id: window::Id,
-        action: String,
+        action: crate::action::Action,
     },
     CloseWindow(window::Id),
     TickElapsed,
@@ -126,11 +126,15 @@ impl NotificationUi {
                 iced_runtime::task::effect(Action::Window(WindowAction::Close(id)))
             }
             Message::ActionInvocation { id, action } => {
-                info!("Action invocation: {} on {}", action, id);
+                info!("Action invocation: {:?} on {}", action, id);
                 let reply_handle = self.reply_handle.clone();
+                // TODO: Activate windows
                 Task::future(async move {
                     reply_handle
-                        .action_invoked(id.to_string().parse().unwrap(), action.as_str())
+                        .action_invoked(
+                            id.to_string().parse().unwrap(),
+                            &serde_json::to_string(&action).unwrap(),
+                        )
                         .await
                         .expect("Failed to send action invocation");
                     Message::CloseWindow(id)
@@ -187,7 +191,7 @@ impl NotificationUi {
         }
     }
 
-    fn view(&self, id: window::Id) -> Element<Message> {
+    fn view(&'_ self, id: window::Id) -> Element<'_, Message> {
         let notification_box = self
             .ids
             .get(&id)
@@ -308,10 +312,10 @@ impl NotificationBox {
         let actions = notification
             .actions
             .iter()
-            .map(|(name, text)| {
-                Button::new(text!("{}", text)).on_press(Message::ActionInvocation {
+            .map(|(name, action)| {
+                Button::new(text!("{}", name)).on_press(Message::ActionInvocation {
                     id: notification.id,
-                    action: text.to_string(),
+                    action: action.clone(),
                 })
             })
             .map(Element::new);

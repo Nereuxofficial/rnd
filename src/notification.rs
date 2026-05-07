@@ -5,6 +5,8 @@ use std::fmt::{Debug, Formatter};
 use std::time::Instant;
 use zbus::zvariant;
 
+use crate::action::Action;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Expiry {
     Never,
@@ -20,7 +22,9 @@ pub struct Notification {
     pub app_icon: Box<str>,
     pub summary: Box<str>,
     pub body: Box<str>,
-    pub actions: HashMap<Box<str>, Box<str>>,
+    /// The default action invoked by clicking on the notification
+    pub default_action: Option<Action>,
+    pub actions: HashMap<Box<str>, Action>,
     pub hints: HashMap<Box<str>, zvariant::OwnedValue>,
     #[serde(skip_serializing, deserialize_with = "generate_new_instant")]
     pub start_time: Instant,
